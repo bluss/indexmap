@@ -14,6 +14,8 @@ mod serde;
 mod util;
 mod equivalent;
 mod mutable_keys;
+mod view;
+mod view_mut;
 
 pub mod set;
 
@@ -33,6 +35,8 @@ use util::{third, ptrdistance, enumerate};
 pub use equivalent::Equivalent;
 pub use mutable_keys::MutableKeys;
 pub use set::OrderSet;
+pub use view::OrderMapView;
+pub use view_mut::OrderMapViewMut;
 
 fn hash_elem_using<B: BuildHasher, K: ?Sized + Hash>(build: &B, k: &K) -> HashValue {
     let mut h = build.build_hasher();
@@ -367,20 +371,6 @@ fn to_raw_capacity(n: usize) -> usize {
     n + n / 3
 }
 
-// this could not be captured in an efficient iterator
-macro_rules! probe_loop {
-    ($probe_var: ident < $len: expr, $body: expr) => {
-        loop {
-            if $probe_var < $len {
-                $body
-                $probe_var += 1;
-            } else {
-                $probe_var = 0;
-            }
-        }
-    }
-}
-
 impl<K, V> OrderMap<K, V> {
     /// Create a new map. (Does not allocate.)
     pub fn new() -> Self {
@@ -470,6 +460,16 @@ impl<K, V, S> OrderMap<K, V, S>
     pub fn capacity(&self) -> usize {
         usable_capacity(self.raw_capacity())
     }
+
+    /// Creates a read-only view of the map.
+    pub fn view(&self) -> OrderMapView<K, V, S> {
+        OrderMapView::new(self)
+    }
+
+    /// Creates a mutable view of the map.
+    pub fn view_mut(&mut self) -> OrderMapViewMut<K, V, S> {
+        OrderMapViewMut::new(self)
+    }
 }
 
 /// Trait for the "size class". Either u32 or u64 depending on the index
@@ -489,27 +489,6 @@ impl Size for u32 {
 impl Size for u64 {
     #[inline]
     fn is_64_bit() -> bool { true }
-}
-
-/// Call self.method(args) with `::<u32>` or `::<u64>` depending on `self`
-/// size class.
-///
-/// The u32 or u64 is *prepended* to the type parameter list!
-macro_rules! dispatch_32_vs_64 {
-    ($self_:ident . $method:ident::<$($t:ty),*>($($arg:expr),*)) => {
-        if $self_.size_class_is_64bit() {
-            $self_.$method::<u64, $($t),*>($($arg),*)
-        } else {
-            $self_.$method::<u32, $($t),*>($($arg),*)
-        }
-    };
-    ($self_:ident . $method:ident ($($arg:expr),*)) => {
-        if $self_.size_class_is_64bit() {
-            $self_.$method::<u64>($($arg),*)
-        } else {
-            $self_.$method::<u32>($($arg),*)
-        }
-    };
 }
 
 /// FIXME: Remove dependence on the `S` parameter

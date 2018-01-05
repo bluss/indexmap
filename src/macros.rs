@@ -120,3 +120,38 @@ macro_rules! double_ended_iterator_methods {
         }
     }
 }
+
+// this could not be captured in an efficient iterator
+macro_rules! probe_loop {
+    ($probe_var: ident < $len: expr, $body: expr) => {
+        loop {
+            if $probe_var < $len {
+                $body
+                $probe_var += 1;
+            } else {
+                $probe_var = 0;
+            }
+        }
+    }
+}
+
+/// Call self.method(args) with `::<u32>` or `::<u64>` depending on `self`
+/// size class.
+///
+/// The u32 or u64 is *prepended* to the type parameter list!
+macro_rules! dispatch_32_vs_64 {
+    ($self_:ident . $method:ident::<$($t:ty),*>($($arg:expr),*)) => {
+        if $self_.size_class_is_64bit() {
+            $self_.$method::<u64, $($t),*>($($arg),*)
+        } else {
+            $self_.$method::<u32, $($t),*>($($arg),*)
+        }
+    };
+    ($self_:ident . $method:ident ($($arg:expr),*)) => {
+        if $self_.size_class_is_64bit() {
+            $self_.$method::<u64>($($arg),*)
+        } else {
+            $self_.$method::<u32>($($arg),*)
+        }
+    };
+}
