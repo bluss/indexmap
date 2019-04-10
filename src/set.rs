@@ -363,6 +363,41 @@ impl<T, S> IndexSet<T, S>
         self.map.retain(move |x, &mut ()| keep(x))
     }
 
+    /// Move an existing value to a specified position in the set's ordering,
+    /// while maintaining the order of all other values in the set.
+    ///
+    /// Return `Some(())` on success, `None` on failure. Failure occurs if the
+    /// specified value is not in the set, or if `new_index` is not a valid
+    /// index for the set.
+    ///
+    /// + `value`: Value whose position in the set's ordering is to be changed.
+    /// + `new_index`: Numerical index indicating the new position to which the
+    ///   value should be moved, within the set's ordering.
+    ///
+    /// Computes in **O(|curr_index - new_index| + 1)** time (average), where
+    /// `curr_index` is the numerical index of the value before the change.
+    pub fn reorder_value<Q: ?Sized>(&mut self, value: &Q, new_index: usize) -> Option<()>
+        where Q: Hash + Equivalent<T>,
+    {
+        self.map.reorder_entry(value, new_index)
+    }
+
+    /// Move an existing value to a specified position in the set's ordering,
+    /// while maintaining the order of all other values in the set.
+    ///
+    /// Return `Some(())` on success, `None` on failure. Failure occurs if the
+    /// provided index values are not valid indices for the set.
+    ///
+    /// + `curr_index`: Numerical index indicating the current position of the
+    ///   value to be moved, within the set's ordering.
+    /// + `new_index`: Numerical index indicating the new position to which the
+    ///   value should be moved, within the set's ordering.
+    ///
+    /// Computes in **O(|curr_index - new_index| + 1)** time (average).
+    pub fn reorder_value_index(&mut self, curr_index: usize, new_index: usize) -> Option<()> {
+        self.map.reorder_entry_index(curr_index, new_index)
+    }
+
     /// Sort the set’s values by their default ordering.
     ///
     /// See `sort_by` for details.
@@ -944,6 +979,16 @@ mod tests {
     use super::*;
     use util::enumerate;
 
+    /// Convert an IndexSet to a vector of value entries, in the set's iteration
+    /// order. Values are cloned so that the vector can own them without
+    /// modifying the IndexSet.
+    fn set_to_vec<T, S>(set: &IndexSet<T, S>) -> Vec<T> where
+        T: Hash + Eq + Clone,
+        S: BuildHasher
+    {
+        set.iter().map(|value_ref| value_ref.clone()).collect()
+    }
+
     #[test]
     fn it_works() {
         let mut set = IndexSet::new();
@@ -1159,6 +1204,90 @@ mod tests {
         for (a, b) in vector.iter().zip(set.iter()) {
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    fn reorder_value() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut set = IndexSet::new();
+
+        for &elt in &insert {
+            set.insert(elt);
+        }
+
+        assert_eq!(insert.to_vec(), set_to_vec(&set));
+
+        // Try moving values to different positions.
+        set.reorder_value(&12, 0).unwrap();
+        set.reorder_value(&12, 4).unwrap();
+        set.reorder_value(&4, 6).unwrap();
+        set.reorder_value(&4, 4).unwrap();
+        set.reorder_value(&0, 5).unwrap();
+        let expected_vec = vec![2, 8, 12, 4, 7, 0, 11];
+        assert_eq!(expected_vec, set_to_vec(&set));
+
+        // Try moving values to where they already are, and check that this
+        // doesn't change anything.
+        set.reorder_value(&12, 2).unwrap();
+        set.reorder_value(&0, 5).unwrap();
+        set.reorder_value(&11, 6).unwrap();
+        set.reorder_value(&7, 4).unwrap();
+        assert_eq!(expected_vec, set_to_vec(&set));
+    }
+
+    #[test]
+    fn reorder_value_index() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut set = IndexSet::new();
+
+        for &elt in &insert {
+            set.insert(elt);
+        }
+
+        assert_eq!(insert.to_vec(), set_to_vec(&set));
+
+        // Try moving values to different positions.
+        set.reorder_value_index(3, 0).unwrap();
+        set.reorder_value_index(0, 4).unwrap();
+        set.reorder_value_index(1, 6).unwrap();
+        set.reorder_value_index(6, 4).unwrap();
+        set.reorder_value_index(0, 5).unwrap();
+        let expected_vec = vec![2, 8, 12, 4, 7, 0, 11];
+        assert_eq!(expected_vec, set_to_vec(&set));
+
+        // Try moving values to where they already are, and check that this
+        // doesn't change anything.
+        set.reorder_value_index(2, 2).unwrap();
+        set.reorder_value_index(5, 5).unwrap();
+        set.reorder_value_index(6, 6).unwrap();
+        set.reorder_value_index(4, 4).unwrap();
+        assert_eq!(expected_vec, set_to_vec(&set));
+    }
+
+    #[test]
+    fn reorder_value_failure() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut set = IndexSet::new();
+
+        for &elt in &insert {
+            set.insert(elt);
+        }
+
+        // Try calling reorder_value with nonexistent values, using both valid
+        // and invalid indices.
+        assert_eq!(set.reorder_value(&1, 0), None);
+        assert_eq!(set.reorder_value(&5, 7), None);
+        assert_eq!(set.reorder_value(&3, 10), None);
+
+        // Try calling reorder_value with valid values but invalid indices.
+        assert_eq!(set.reorder_value(&2, 7), None);
+        assert_eq!(set.reorder_value(&12, 10), None);
+
+        // Try calling reorder_value_index with invalid indices.
+        assert_eq!(set.reorder_value_index(0, 15), None);
+        assert_eq!(set.reorder_value_index(1, 7), None);
+        assert_eq!(set.reorder_value_index(7, 1), None);
+        assert_eq!(set.reorder_value_index(8, 9), None);
     }
 
     #[test]

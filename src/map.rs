@@ -6,6 +6,7 @@ pub use mutable_keys::MutableKeys;
 use std::hash::Hash;
 use std::hash::BuildHasher;
 use std::hash::Hasher;
+use std::iter::once;
 use std::iter::FromIterator;
 use std::collections::hash_map::RandomState;
 use std::ops::RangeFull;
@@ -1001,6 +1002,52 @@ impl<K, V, S> IndexMap<K, V, S>
         self.core.retain_in_order_impl::<Sz, F>(keep);
     }
 
+    /// Move an existing entry to a specified position in the map's ordering,
+    /// while maintaining the order of all other entries.
+    ///
+    /// Return `Some(())` on success, `None` on failure. Failure occurs if no
+    /// entry with the specified key exists in the map, or if `new_index` is not
+    /// a valid index for the map.
+    ///
+    /// + `key`: Key of the entry whose position in the map's ordering is to be
+    ///   changed.
+    /// + `new_index`: Numerical index indicating the new position to which the
+    ///   entry should be moved, within the map's ordering.
+    ///
+    /// Computes in **O(|curr_index - new_index| + 1)** time (average), where
+    /// `curr_index` is the numerical index of the entry before the change.
+    pub fn reorder_entry<Q: ?Sized>(&mut self, key: &Q, new_index: usize) -> Option<()>
+        where Q: Hash + Equivalent<K>,
+    {
+        if new_index >= self.len() {
+            return None;
+        }
+
+        let curr_index = self.get_full(key)?.0;
+        self.reorder_entry_index(curr_index, new_index)
+    }
+
+    /// Move an existing entry to a specified position in the map's ordering,
+    /// while maintaining the order of all other entries.
+    ///
+    /// Return `Some(())` on success, `None` on failure. Failure occurs if the
+    /// provided index values are not valid indices for the map.
+    ///
+    /// + `curr_index`: Numerical index indicating the current position of the
+    ///   entry to be moved, within the map's ordering.
+    /// + `new_index`: Numerical index indicating the new position to which the
+    ///   entry should be moved, within the map's ordering.
+    ///
+    /// Computes in **O(|curr_index - new_index| + 1)** time (average).
+    pub fn reorder_entry_index(&mut self, curr_index: usize, new_index: usize) -> Option<()> {
+        if curr_index >= self.len() || new_index >= self.len() {
+            return None;
+        }
+
+        self.core.reorder_entry_found(curr_index, new_index);
+        Some(())
+    }
+
     /// Sort the map’s key-value pairs by the default ordering of the keys.
     ///
     /// See `sort_by` for details.
@@ -1345,6 +1392,118 @@ impl<K, V> OrderMapCore<K, V> {
         let probe = dispatch_32_vs_64!(self =>
             find_existing_entry_at(&self.indices, hash, self.mask, actual_pos));
         (probe, actual_pos)
+    }
+
+    /// Update self.indices to reflect a change in the ordering of the entries
+    /// in self.entries.
+    ///
+    /// + `indices_to_update`: An iterator of indices into self.indices
+    ///   indicating the slots where a corresponding entry in self.entries has
+    ///   changed position. If the iterator returns an index pointing to an
+    ///   empty slot in self.indices, that slot will be skipped and not updated.
+    /// + `new_positions_to_store`: An iterator of indices into self.entries
+    ///   indicating the new positions to which the referenced slots in
+    ///   self.indices should point after the update. Must contain the same
+    ///   number of items as indices_to_update.
+    fn update_indices<I, J>(&mut self, indices_to_update: I, new_positions_to_store: J)
+        where I: Iterator<Item = usize>,
+              J: Iterator<Item = usize>
+    {
+        dispatch_32_vs_64!(self.update_indices_impl::<I, J>(indices_to_update,
+            new_positions_to_store))
+    }
+
+    fn update_indices_impl<Sz, I, J>(&mut self, indices_to_update: I, new_positions_to_store: J)
+        where Sz: Size,
+              I: Iterator<Item = usize>,
+              J: Iterator<Item = usize>
+    {
+        for (index_to_update, new_position_to_store) in indices_to_update.zip(new_positions_to_store) {
+            let pos = &mut self.indices[index_to_update];
+            if !pos.is_none() {
+                pos.set_pos::<Sz>(new_position_to_store);
+            }
+        }
+    }
+
+    /// Probe self.indices to find the slot that points to the specified
+    /// position in self.entries.
+    ///
+    /// Return an index into self.indices indicating the location of the
+    /// matching slot that was found.
+    ///
+    /// + `index`: The position value to look for in self.indices. This method
+    ///   will probe until it finds a slot in self.indices that points to this
+    ///   position in self.entries. Must be a valid index for self.entries.
+    fn probe_to_referenced_pos(&self, index: usize) -> usize {
+        dispatch_32_vs_64!(self.probe_to_referenced_pos_impl(index))
+    }
+
+    fn probe_to_referenced_pos_impl<Sz>(&self, index: usize) -> usize
+        where Sz: Size
+    {
+        let mut probe = desired_pos(self.mask, self.entries[index].hash);
+        probe_loop!(probe < self.indices.len(), {
+            if let Some((stored_index, _)) = self.indices[probe].resolve::<Sz>() {
+                if stored_index == index {
+                    return probe;
+                }
+            }
+        })
+    }
+
+    /// Move an entry from its current index in the map's ordering to a
+    /// different index, while maintaining the order of all other entries.
+    ///
+    /// + `curr_index`: Numerical index indicating the current position of the
+    ///   entry to be moved, within the map's ordering. Must be a valid index
+    ///   for the map.
+    /// + `new_index`: Numerical index indicating the new position to which the
+    ///   entry should be moved, within the map's ordering. Must be a valid
+    ///   index for the map.
+    fn reorder_entry_found(&mut self, curr_index: usize, new_index: usize) {
+        if curr_index == new_index {
+            return;
+        }
+
+        // Compute information about the indices at which we are moving entries.
+        let moving_to_greater = new_index > curr_index;
+        let (low_index, high_index) = {
+            if moving_to_greater {
+                (curr_index, new_index)
+            } else {
+                (new_index, curr_index)
+            }
+        };
+
+        // Determine what indices in self.indices will need to be updated after
+        // the reordering. This is done before the reordering of self.entries so
+        // that the probing will start at the right hash values.
+        let indices_to_update : Vec<usize> = (low_index..(high_index + 1))
+            .map(|index| self.probe_to_referenced_pos(index)).collect();
+
+        // Change the order in self.entries.
+        {
+            let slice = &mut self.entries[low_index..(high_index + 1)];
+            if moving_to_greater {
+                slice.rotate_left(1);
+            } else {
+                slice.rotate_right(1);
+            }
+        }
+
+        // Update the relevant elements of self.indices to match the new order.
+        if moving_to_greater {
+            let new_positions_to_store = once(high_index)
+                .chain(low_index..high_index);
+            self.update_indices(indices_to_update.into_iter(),
+                new_positions_to_store);
+        } else {
+            let new_positions_to_store = ((low_index + 1)..(high_index + 1))
+                .chain(once(low_index));
+            self.update_indices(indices_to_update.into_iter(),
+                new_positions_to_store);
+        }
     }
 
     fn remove_found(&mut self, probe: usize, found: usize) -> (K, V) {
@@ -1902,6 +2061,17 @@ mod tests {
     use super::*;
     use util::enumerate;
 
+    /// Convert an IndexMap to a vector of (key, value) entries, in the map's
+    /// iteration order. Keys and values are cloned so that the vector can own
+    /// them without modifying the IndexMap.
+    fn map_to_vec<K, V, S>(map: &IndexMap<K, V, S>) -> Vec<(K, V)> where
+        K: Hash + Eq + Clone,
+        V: Clone,
+        S: BuildHasher
+    {
+        map.iter().map(|(key_ref, value_ref)| (key_ref.clone(), value_ref.clone())).collect()
+    }
+
     #[test]
     fn it_works() {
         let mut map = IndexMap::new();
@@ -2108,6 +2278,92 @@ mod tests {
         for (a, b) in vector.iter().zip(map.keys()) {
             assert_eq!(a, b);
         }
+    }
+
+    #[test]
+    fn reorder_entry() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut map = IndexMap::new();
+
+        for &elt in &insert {
+            map.insert(elt, elt * 2);
+        }
+
+        let expected_vec_0 = vec![(0, 0), (4, 8), (2, 4), (12, 24), (8, 16), (7, 14), (11, 22)];
+        assert_eq!(expected_vec_0, map_to_vec(&map));
+
+        // Try moving entries to different positions.
+        map.reorder_entry(&12, 0).unwrap();
+        map.reorder_entry(&12, 4).unwrap();
+        map.reorder_entry(&4, 6).unwrap();
+        map.reorder_entry(&4, 4).unwrap();
+        map.reorder_entry(&0, 5).unwrap();
+        let expected_vec_1 = vec![(2, 4), (8, 16), (12, 24), (4, 8), (7, 14), (0, 0), (11, 22)];
+        assert_eq!(expected_vec_1, map_to_vec(&map));
+
+        // Try moving entries to where they already are, and check that this
+        // doesn't change anything.
+        map.reorder_entry(&12, 2).unwrap();
+        map.reorder_entry(&0, 5).unwrap();
+        map.reorder_entry(&11, 6).unwrap();
+        map.reorder_entry(&7, 4).unwrap();
+        assert_eq!(expected_vec_1, map_to_vec(&map));
+    }
+
+    #[test]
+    fn reorder_entry_index() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut map = IndexMap::new();
+
+        for &elt in &insert {
+            map.insert(elt, elt * 2);
+        }
+
+        let expected_vec_0 = vec![(0, 0), (4, 8), (2, 4), (12, 24), (8, 16), (7, 14), (11, 22)];
+        assert_eq!(expected_vec_0, map_to_vec(&map));
+
+        // Try moving entries to different positions.
+        map.reorder_entry_index(3, 0).unwrap();
+        map.reorder_entry_index(0, 4).unwrap();
+        map.reorder_entry_index(1, 6).unwrap();
+        map.reorder_entry_index(6, 4).unwrap();
+        map.reorder_entry_index(0, 5).unwrap();
+        let expected_vec_1 = vec![(2, 4), (8, 16), (12, 24), (4, 8), (7, 14), (0, 0), (11, 22)];
+        assert_eq!(expected_vec_1, map_to_vec(&map));
+
+        // Try moving entries to where they already are, and check that this
+        // doesn't change anything.
+        map.reorder_entry_index(2, 2).unwrap();
+        map.reorder_entry_index(5, 5).unwrap();
+        map.reorder_entry_index(6, 6).unwrap();
+        map.reorder_entry_index(4, 4).unwrap();
+        assert_eq!(expected_vec_1, map_to_vec(&map));
+    }
+
+    #[test]
+    fn reorder_entry_failure() {
+        let insert = [0, 4, 2, 12, 8, 7, 11];
+        let mut map = IndexMap::new();
+
+        for &elt in &insert {
+            map.insert(elt, elt * 2);
+        }
+
+        // Try calling reorder_entry with nonexistent keys, using both valid and
+        // invalid indices.
+        assert_eq!(map.reorder_entry(&1, 0), None);
+        assert_eq!(map.reorder_entry(&5, 7), None);
+        assert_eq!(map.reorder_entry(&3, 10), None);
+
+        // Try calling reorder_entry with valid keys but invalid indices.
+        assert_eq!(map.reorder_entry(&2, 7), None);
+        assert_eq!(map.reorder_entry(&12, 10), None);
+
+        // Try calling reorder_entry_index with invalid indices.
+        assert_eq!(map.reorder_entry_index(0, 15), None);
+        assert_eq!(map.reorder_entry_index(1, 7), None);
+        assert_eq!(map.reorder_entry_index(7, 1), None);
+        assert_eq!(map.reorder_entry_index(8, 9), None);
     }
 
     #[test]
