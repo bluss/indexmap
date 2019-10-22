@@ -16,6 +16,7 @@ use std::hash::BuildHasher;
 use std::hash::Hasher;
 use std::iter::FromIterator;
 use std::ops::RangeFull;
+use std::ops::RangeBounds;
 
 #[cfg(has_std)]
 use std::collections::hash_map::RandomState;
@@ -25,7 +26,7 @@ use std::fmt;
 use std::mem::{replace};
 use std::marker::PhantomData;
 
-use util::{third, ptrdistance, enumerate};
+use util::{third, ptrdistance, enumerate, SliceWith};
 use equivalent::Equivalent;
 use {
     Bucket,
@@ -947,6 +948,48 @@ impl<K, V, S> IndexMap<K, V, S>
         ValuesMut {
             iter: self.core.entries.iter_mut()
         }
+    }
+
+    /// Return a sliced iterator over the key-value pairs of the map, in their order
+    ///
+    /// ***Panics*** if the range is out of bounds.
+    pub fn iter_slice<I>(&self, range: I) -> Iter<K, V>
+        where I: RangeBounds<usize>
+    {
+        Iter {
+            iter: self.core.entries.slice(range).iter()
+        }
+    }
+
+    /// Return a sliced iterator over the key-value pairs of the map, in their order
+    ///
+    /// ***Panics*** if the range is out of bounds.
+    pub fn iter_slice_mut<I>(&mut self, range: I) -> IterMut<K, V>
+        where I: RangeBounds<usize>
+    {
+        IterMut {
+            iter: self.core.entries.slice_mut(range).iter_mut()
+        }
+    }
+
+
+    /// Return a sliced iterator over the values of the map, in their order
+    ///
+    /// ***Panics*** if the range is out of bounds.
+    pub fn values_slice<I>(&self, range: I) -> Values<K, V>
+        where I: RangeBounds<usize>
+    {
+        Values { iter: self.core.entries.slice(range).iter() }
+    }
+
+    /// Return a sliced iterator over mutable references to the the values of the map,
+    /// in their order
+    ///
+    /// ***Panics*** if the range is out of bounds.
+    pub fn values_slice_mut<I>(&mut self, range: I) -> ValuesMut<K, V>
+        where I: RangeBounds<usize>
+    {
+        ValuesMut { iter: self.core.entries.slice_mut(range).iter_mut() }
     }
 
     /// Return `true` if an equivalent to `key` exists in the map.
