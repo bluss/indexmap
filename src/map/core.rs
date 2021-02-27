@@ -270,29 +270,72 @@ impl<K, V> IndexMapCore<K, V> {
     ///
     /// The index should already be removed from `self.indices`.
     fn shift_remove_finish(&mut self, index: usize) -> (K, V) {
-        // use Vec::remove, but then we need to update the indices that point
-        // to all of the other entries that have to move
-        let entry = self.entries.remove(index);
-
         // correct indices that point to the entries that followed the removed entry.
+        self.decrement_indices(index + 1, self.entries.len());
+
+        // use Vec::remove to actually remove the entry
+        let entry = self.entries.remove(index);
+        (entry.key, entry.value)
+    }
+
+    /// Decrement all indices in the range `start..end`.
+    ///
+    /// The index `start - 1` should not exist in `self.indices`.
+    /// All entries should still be in their original positions.
+    fn decrement_indices(&mut self, start: usize, end: usize) {
         // use a heuristic between a full sweep vs. a `find()` for every shifted item.
-        let raw_capacity = self.indices.buckets();
-        let shifted_entries = &self.entries[index..];
-        if shifted_entries.len() > raw_capacity / 2 {
-            // shift all indices greater than `index`
+        let shifted_entries = &self.entries[start..end];
+        if shifted_entries.len() > self.indices.buckets() / 2 {
+            // shift all indices in range
             for i in self.indices_mut() {
-                if *i > index {
+                if start <= *i && *i < end {
                     *i -= 1;
                 }
             }
         } else {
-            // find each following entry to shift its index
-            for (i, entry) in (index + 1..).zip(shifted_entries) {
+            // find each entry in range to shift its index
+            for (i, entry) in (start..end).zip(shifted_entries) {
                 update_index(&mut self.indices, entry.hash, i, i - 1);
             }
         }
+    }
 
-        (entry.key, entry.value)
+    /// Increment all indices in the range `start..end`.
+    ///
+    /// The index `end` should not exist in `self.indices`.
+    /// All entries should still be in their original positions.
+    fn increment_indices(&mut self, start: usize, end: usize) {
+        // use a heuristic between a full sweep vs. a `find()` for every shifted item.
+        let shifted_entries = &self.entries[start..end];
+        if shifted_entries.len() > self.indices.buckets() / 2 {
+            // shift all indices in range
+            for i in self.indices_mut() {
+                if start <= *i && *i < end {
+                    *i += 1;
+                }
+            }
+        } else {
+            // find each entry in range to shift its index, updated in reverse so
+            // we never have duplicated indices that might have a hash collision.
+            for (i, entry) in (start..end).zip(shifted_entries).rev() {
+                update_index(&mut self.indices, entry.hash, i, i + 1);
+            }
+        }
+    }
+
+    pub(super) fn move_index(&mut self, from: usize, to: usize) {
+        let from_hash = self.entries[from].hash;
+        if from != to {
+            erase_index(&mut self.indices, from_hash, from);
+            if from < to {
+                self.decrement_indices(from + 1, to + 1);
+                self.entries[from..=to].rotate_left(1);
+            } else if to < from {
+                self.increment_indices(to, from);
+                self.entries[to..=from].rotate_right(1);
+            }
+            self.indices.insert_no_grow(from_hash.get(), to);
+        }
     }
 
     /// Remove an entry by swapping it with the last
