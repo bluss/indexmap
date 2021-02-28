@@ -14,7 +14,7 @@ use core::ops::{self, Index, IndexMut};
 /// and `Eq`, and it also implements `PartialOrd`, `Ord`, and `Hash`.
 #[repr(transparent)]
 pub struct Slice<K, V> {
-    entries: [Bucket<K, V>],
+    pub(crate) entries: [Bucket<K, V>],
 }
 
 #[allow(unsafe_code)]
