@@ -2,7 +2,9 @@
 //! pairs is independent of the hash values of the keys.
 
 mod core;
+mod slice;
 
+pub use self::slice::Slice;
 pub use crate::mutable_keys::MutableKeys;
 
 #[cfg(feature = "rayon")]

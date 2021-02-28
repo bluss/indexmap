@@ -1,5 +1,9 @@
 //! A hash set implemented using `IndexMap`
 
+mod slice;
+
+pub use self::slice::Slice;
+
 #[cfg(feature = "rayon")]
 pub use crate::rayon::set as rayon;
 
@@ -12,7 +16,7 @@ use core::fmt;
 use core::hash::{BuildHasher, Hash};
 use core::iter::{Chain, FromIterator};
 use core::ops::{BitAnd, BitOr, BitXor, Index, RangeBounds, Sub};
-use core::slice;
+use core::slice::Iter as SliceIter;
 
 use super::{Entries, Equivalent, IndexMap};
 
@@ -189,7 +193,7 @@ impl<T, S> IndexSet<T, S> {
     /// Return an iterator over the values of the set, in their order
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
-            iter: self.map.keys().iter,
+            iter: self.map.as_entries().iter(),
         }
     }
 
@@ -734,7 +738,7 @@ impl<T: fmt::Debug> fmt::Debug for IntoIter<T> {
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`iter`]: struct.IndexSet.html#method.iter
 pub struct Iter<'a, T> {
-    iter: slice::Iter<'a, Bucket<T>>,
+    iter: SliceIter<'a, Bucket<T>>,
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {
