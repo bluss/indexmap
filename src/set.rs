@@ -14,7 +14,7 @@ use core::iter::{Chain, FromIterator};
 use core::ops::{BitAnd, BitOr, BitXor, Index, RangeBounds, Sub};
 use core::slice;
 
-use super::{Entries, Equivalent, IndexMap};
+use super::{Entries, Equivalent, IndexMap, Indexable, WithEntries};
 
 type Bucket<T> = super::Bucket<T, ()>;
 
@@ -60,18 +60,19 @@ type Bucket<T> = super::Bucket<T, ()>;
 /// assert!(!letters.contains(&'y'));
 /// ```
 #[cfg(has_std)]
-pub struct IndexSet<T, S = RandomState> {
-    map: IndexMap<T, (), S>,
+pub struct IndexSet<T, S = RandomState, Idx = usize> {
+    map: IndexMap<T, (), S, Idx>,
 }
 #[cfg(not(has_std))]
-pub struct IndexSet<T, S> {
-    map: IndexMap<T, (), S>,
+pub struct IndexSet<T, S, Idx = usize> {
+    map: IndexMap<T, (), S, Idx>,
 }
 
-impl<T, S> Clone for IndexSet<T, S>
+impl<T, S, Idx> Clone for IndexSet<T, S, Idx>
 where
     T: Clone,
     S: Clone,
+    Idx: Indexable,
 {
     fn clone(&self) -> Self {
         IndexSet {
@@ -84,7 +85,7 @@ where
     }
 }
 
-impl<T, S> Entries for IndexSet<T, S> {
+impl<T, S, Idx> Entries for IndexSet<T, S, Idx> {
     type Entry = Bucket<T>;
 
     #[inline]
@@ -101,7 +102,9 @@ impl<T, S> Entries for IndexSet<T, S> {
     fn as_entries_mut(&mut self) -> &mut [Self::Entry] {
         self.map.as_entries_mut()
     }
+}
 
+impl<T, S, Idx: Indexable> WithEntries for IndexSet<T, S, Idx> {
     fn with_entries<F>(&mut self, f: F)
     where
         F: FnOnce(&mut [Self::Entry]),
@@ -110,9 +113,10 @@ impl<T, S> Entries for IndexSet<T, S> {
     }
 }
 
-impl<T, S> fmt::Debug for IndexSet<T, S>
+impl<T, S, Idx> fmt::Debug for IndexSet<T, S, Idx>
 where
     T: fmt::Debug,
+    Idx: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if cfg!(not(feature = "test_debug")) {
@@ -144,7 +148,7 @@ impl<T> IndexSet<T> {
     }
 }
 
-impl<T, S> IndexSet<T, S> {
+impl<T, S, Idx> IndexSet<T, S, Idx> {
     /// Create a new set with capacity for `n` elements.
     /// (Does not allocate if `n` is zero.)
     ///
@@ -199,7 +203,9 @@ impl<T, S> IndexSet<T, S> {
     pub fn clear(&mut self) {
         self.map.clear();
     }
+}
 
+impl<T, S, Idx: Indexable> IndexSet<T, S, Idx> {
     /// Shortens the set, keeping the first `len` elements and dropping the rest.
     ///
     /// If `len` is greater than the set's current length, this has no effect.
@@ -210,7 +216,7 @@ impl<T, S> IndexSet<T, S> {
     /// Clears the `IndexSet` in the given index range, returning those values
     /// as a drain iterator.
     ///
-    /// The range may be any type that implements `RangeBounds<usize>`,
+    /// The range may be any type that implements `RangeBounds<Idx>`,
     /// including all of the `std::ops::Range*` types, or even a tuple pair of
     /// `Bound` start and end values. To drain the set entirely, use `RangeFull`
     /// like `set.drain(..)`.
@@ -222,7 +228,7 @@ impl<T, S> IndexSet<T, S> {
     /// the end point is greater than the length of the set.
     pub fn drain<R>(&mut self, range: R) -> Drain<'_, T>
     where
-        R: RangeBounds<usize>,
+        R: RangeBounds<Idx>,
     {
         Drain {
             iter: self.map.drain(range).iter,
@@ -236,7 +242,7 @@ impl<T, S> IndexSet<T, S> {
     /// the elements `[0, at)` with its previous capacity unchanged.
     ///
     /// ***Panics*** if `at > len`.
-    pub fn split_off(&mut self, at: usize) -> Self
+    pub fn split_off(&mut self, at: Idx) -> Self
     where
         S: Clone,
     {
@@ -246,10 +252,11 @@ impl<T, S> IndexSet<T, S> {
     }
 }
 
-impl<T, S> IndexSet<T, S>
+impl<T, S, Idx> IndexSet<T, S, Idx>
 where
     T: Hash + Eq,
     S: BuildHasher,
+    Idx: Indexable,
 {
     /// Reserve capacity for `additional` more values.
     ///
@@ -286,7 +293,7 @@ where
     /// of the inserted item and `true`.
     ///
     /// Computes in **O(1)** time (amortized average).
-    pub fn insert_full(&mut self, value: T) -> (usize, bool) {
+    pub fn insert_full(&mut self, value: T) -> (Idx, bool) {
         use super::map::Entry::*;
 
         match self.map.entry(value) {
@@ -302,7 +309,10 @@ where
     /// Return an iterator over the values that are in `self` but not `other`.
     ///
     /// Values are produced in the same order that they appear in `self`.
-    pub fn difference<'a, S2>(&'a self, other: &'a IndexSet<T, S2>) -> Difference<'a, T, S2>
+    pub fn difference<'a, S2>(
+        &'a self,
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> Difference<'a, T, S2, Idx>
     where
         S2: BuildHasher,
     {
@@ -319,8 +329,8 @@ where
     /// values from `other` in their original order.
     pub fn symmetric_difference<'a, S2>(
         &'a self,
-        other: &'a IndexSet<T, S2>,
-    ) -> SymmetricDifference<'a, T, S, S2>
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> SymmetricDifference<'a, T, S, S2, Idx>
     where
         S2: BuildHasher,
     {
@@ -332,7 +342,10 @@ where
     /// Return an iterator over the values that are in both `self` and `other`.
     ///
     /// Values are produced in the same order that they appear in `self`.
-    pub fn intersection<'a, S2>(&'a self, other: &'a IndexSet<T, S2>) -> Intersection<'a, T, S2>
+    pub fn intersection<'a, S2>(
+        &'a self,
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> Intersection<'a, T, S2, Idx>
     where
         S2: BuildHasher,
     {
@@ -346,7 +359,7 @@ where
     ///
     /// Values from `self` are produced in their original order, followed by
     /// values that are unique to `other` in their original order.
-    pub fn union<'a, S2>(&'a self, other: &'a IndexSet<T, S2>) -> Union<'a, T, S>
+    pub fn union<'a, S2>(&'a self, other: &'a IndexSet<T, S2, Idx>) -> Union<'a, T, S, Idx>
     where
         S2: BuildHasher,
     {
@@ -377,7 +390,7 @@ where
     }
 
     /// Return item index and value
-    pub fn get_full<Q: ?Sized>(&self, value: &Q) -> Option<(usize, &T)>
+    pub fn get_full<Q: ?Sized>(&self, value: &Q) -> Option<(Idx, &T)>
     where
         Q: Hash + Equivalent<T>,
     {
@@ -385,7 +398,7 @@ where
     }
 
     /// Return item index, if it exists in the set
-    pub fn get_index_of<Q: ?Sized>(&self, value: &Q) -> Option<usize>
+    pub fn get_index_of<Q: ?Sized>(&self, value: &Q) -> Option<Idx>
     where
         Q: Hash + Equivalent<T>,
     {
@@ -509,7 +522,7 @@ where
     /// the postion of what used to be the last element!**
     ///
     /// Return `None` if `value` was not in the set.
-    pub fn swap_remove_full<Q: ?Sized>(&mut self, value: &Q) -> Option<(usize, T)>
+    pub fn swap_remove_full<Q: ?Sized>(&mut self, value: &Q) -> Option<(Idx, T)>
     where
         Q: Hash + Equivalent<T>,
     {
@@ -523,7 +536,7 @@ where
     /// **This perturbs the index of all of those elements!**
     ///
     /// Return `None` if `value` was not in the set.
-    pub fn shift_remove_full<Q: ?Sized>(&mut self, value: &Q) -> Option<(usize, T)>
+    pub fn shift_remove_full<Q: ?Sized>(&mut self, value: &Q) -> Option<(Idx, T)>
     where
         Q: Hash + Equivalent<T>,
     {
@@ -592,14 +605,16 @@ where
     }
 }
 
-impl<T, S> IndexSet<T, S> {
+impl<T, S, Idx: Indexable> IndexSet<T, S, Idx> {
     /// Get a value by index
     ///
     /// Valid indices are *0 <= index < self.len()*
     ///
     /// Computes in **O(1)** time.
-    pub fn get_index(&self, index: usize) -> Option<&T> {
-        self.as_entries().get(index).map(Bucket::key_ref)
+    pub fn get_index(&self, index: Idx) -> Option<&T> {
+        self.as_entries()
+            .get(index.into_usize())
+            .map(Bucket::key_ref)
     }
 
     /// Get the first value
@@ -625,7 +640,7 @@ impl<T, S> IndexSet<T, S> {
     /// the postion of what used to be the last element!**
     ///
     /// Computes in **O(1)** time (average).
-    pub fn swap_remove_index(&mut self, index: usize) -> Option<T> {
+    pub fn swap_remove_index(&mut self, index: Idx) -> Option<T> {
         self.map.swap_remove_index(index).map(|(x, ())| x)
     }
 
@@ -638,14 +653,14 @@ impl<T, S> IndexSet<T, S> {
     /// **This perturbs the index of all of those elements!**
     ///
     /// Computes in **O(n)** time (average).
-    pub fn shift_remove_index(&mut self, index: usize) -> Option<T> {
+    pub fn shift_remove_index(&mut self, index: Idx) -> Option<T> {
         self.map.shift_remove_index(index).map(|(x, ())| x)
     }
 
     /// Swaps the position of two values in the set.
     ///
     /// ***Panics*** if `a` or `b` are out of bounds.
-    pub fn swap_indices(&mut self, a: usize, b: usize) {
+    pub fn swap_indices(&mut self, a: Idx, b: Idx) {
         self.map.swap_indices(a, b)
     }
 }
@@ -678,13 +693,18 @@ impl<T, S> IndexSet<T, S> {
 /// set.insert("foo");
 /// println!("{:?}", set[10]); // panics!
 /// ```
-impl<T, S> Index<usize> for IndexSet<T, S> {
+///
+/// # Implementation note
+///
+/// Unlike the note on `IndexMap`, indexing is automatically implemented for
+/// `IndexSet`s with any `Idx: Indexable`.
+impl<T, S, Idx: Indexable> Index<Idx> for IndexSet<T, S, Idx> {
     type Output = T;
 
     /// Returns a reference to the value at the supplied `index`.
     ///
     /// ***Panics*** if `index` is out of bounds.
-    fn index(&self, index: usize) -> &T {
+    fn index(&self, index: Idx) -> &T {
         self.get_index(index)
             .expect("IndexSet: index out of bounds")
     }
@@ -790,7 +810,7 @@ impl<T> DoubleEndedIterator for Drain<'_, T> {
     double_ended_iterator_methods!(Bucket::key);
 }
 
-impl<'a, T, S> IntoIterator for &'a IndexSet<T, S> {
+impl<'a, T, S, Idx> IntoIterator for &'a IndexSet<T, S, Idx> {
     type Item = &'a T;
     type IntoIter = Iter<'a, T>;
 
@@ -799,7 +819,7 @@ impl<'a, T, S> IntoIterator for &'a IndexSet<T, S> {
     }
 }
 
-impl<T, S> IntoIterator for IndexSet<T, S> {
+impl<T, S, Idx> IntoIterator for IndexSet<T, S, Idx> {
     type Item = T;
     type IntoIter = IntoIter<T>;
 
@@ -810,10 +830,11 @@ impl<T, S> IntoIterator for IndexSet<T, S> {
     }
 }
 
-impl<T, S> FromIterator<T> for IndexSet<T, S>
+impl<T, S, Idx> FromIterator<T> for IndexSet<T, S, Idx>
 where
     T: Hash + Eq,
     S: BuildHasher + Default,
+    Idx: Indexable,
 {
     fn from_iter<I: IntoIterator<Item = T>>(iterable: I) -> Self {
         let iter = iterable.into_iter().map(|x| (x, ()));
@@ -823,10 +844,11 @@ where
     }
 }
 
-impl<T, S> Extend<T> for IndexSet<T, S>
+impl<T, S, Idx> Extend<T> for IndexSet<T, S, Idx>
 where
     T: Hash + Eq,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iterable: I) {
         let iter = iterable.into_iter().map(|x| (x, ()));
@@ -834,10 +856,11 @@ where
     }
 }
 
-impl<'a, T, S> Extend<&'a T> for IndexSet<T, S>
+impl<'a, T, S, Idx> Extend<&'a T> for IndexSet<T, S, Idx>
 where
     T: Hash + Eq + Copy + 'a,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn extend<I: IntoIterator<Item = &'a T>>(&mut self, iterable: I) {
         let iter = iterable.into_iter().cloned(); // FIXME: use `copied` in Rust 1.36
@@ -845,7 +868,7 @@ where
     }
 }
 
-impl<T, S> Default for IndexSet<T, S>
+impl<T, S, Idx> Default for IndexSet<T, S, Idx>
 where
     S: Default,
 {
@@ -857,31 +880,34 @@ where
     }
 }
 
-impl<T, S1, S2> PartialEq<IndexSet<T, S2>> for IndexSet<T, S1>
+impl<T, S1, S2, Idx> PartialEq<IndexSet<T, S2, Idx>> for IndexSet<T, S1, Idx>
 where
     T: Hash + Eq,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
-    fn eq(&self, other: &IndexSet<T, S2>) -> bool {
+    fn eq(&self, other: &IndexSet<T, S2, Idx>) -> bool {
         self.len() == other.len() && self.is_subset(other)
     }
 }
 
-impl<T, S> Eq for IndexSet<T, S>
+impl<T, S, Idx> Eq for IndexSet<T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
 }
 
-impl<T, S> IndexSet<T, S>
+impl<T, S, Idx> IndexSet<T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     /// Returns `true` if `self` has no elements in common with `other`.
-    pub fn is_disjoint<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn is_disjoint<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher,
     {
@@ -893,7 +919,7 @@ where
     }
 
     /// Returns `true` if all elements of `self` are contained in `other`.
-    pub fn is_subset<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn is_subset<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher,
     {
@@ -901,7 +927,7 @@ where
     }
 
     /// Returns `true` if all elements of `other` are contained in `self`.
-    pub fn is_superset<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn is_superset<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher,
     {
@@ -916,15 +942,16 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`difference`]: struct.IndexSet.html#method.difference
-pub struct Difference<'a, T, S> {
+pub struct Difference<'a, T, S, Idx = usize> {
     iter: Iter<'a, T>,
-    other: &'a IndexSet<T, S>,
+    other: &'a IndexSet<T, S, Idx>,
 }
 
-impl<'a, T, S> Iterator for Difference<'a, T, S>
+impl<'a, T, S, Idx> Iterator for Difference<'a, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -942,10 +969,11 @@ where
     }
 }
 
-impl<T, S> DoubleEndedIterator for Difference<'_, T, S>
+impl<T, S, Idx> DoubleEndedIterator for Difference<'_, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         while let Some(item) = self.iter.next_back() {
@@ -957,7 +985,7 @@ where
     }
 }
 
-impl<T, S> Clone for Difference<'_, T, S> {
+impl<T, S, Idx> Clone for Difference<'_, T, S, Idx> {
     fn clone(&self) -> Self {
         Difference {
             iter: self.iter.clone(),
@@ -966,10 +994,11 @@ impl<T, S> Clone for Difference<'_, T, S> {
     }
 }
 
-impl<T, S> fmt::Debug for Difference<'_, T, S>
+impl<T, S, Idx> fmt::Debug for Difference<'_, T, S, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
@@ -983,15 +1012,16 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`intersection`]: struct.IndexSet.html#method.intersection
-pub struct Intersection<'a, T, S> {
+pub struct Intersection<'a, T, S, Idx = usize> {
     iter: Iter<'a, T>,
-    other: &'a IndexSet<T, S>,
+    other: &'a IndexSet<T, S, Idx>,
 }
 
-impl<'a, T, S> Iterator for Intersection<'a, T, S>
+impl<'a, T, S, Idx> Iterator for Intersection<'a, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -1009,10 +1039,11 @@ where
     }
 }
 
-impl<T, S> DoubleEndedIterator for Intersection<'_, T, S>
+impl<T, S, Idx> DoubleEndedIterator for Intersection<'_, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         while let Some(item) = self.iter.next_back() {
@@ -1024,7 +1055,7 @@ where
     }
 }
 
-impl<T, S> Clone for Intersection<'_, T, S> {
+impl<T, S, Idx> Clone for Intersection<'_, T, S, Idx> {
     fn clone(&self) -> Self {
         Intersection {
             iter: self.iter.clone(),
@@ -1033,10 +1064,11 @@ impl<T, S> Clone for Intersection<'_, T, S> {
     }
 }
 
-impl<T, S> fmt::Debug for Intersection<'_, T, S>
+impl<T, S, Idx> fmt::Debug for Intersection<'_, T, S, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
@@ -1050,15 +1082,16 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`symmetric_difference`]: struct.IndexSet.html#method.symmetric_difference
-pub struct SymmetricDifference<'a, T, S1, S2> {
-    iter: Chain<Difference<'a, T, S2>, Difference<'a, T, S1>>,
+pub struct SymmetricDifference<'a, T, S1, S2, Idx = usize> {
+    iter: Chain<Difference<'a, T, S2, Idx>, Difference<'a, T, S1, Idx>>,
 }
 
-impl<'a, T, S1, S2> Iterator for SymmetricDifference<'a, T, S1, S2>
+impl<'a, T, S1, S2, Idx> Iterator for SymmetricDifference<'a, T, S1, S2, Idx>
 where
     T: Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -1078,18 +1111,19 @@ where
     }
 }
 
-impl<T, S1, S2> DoubleEndedIterator for SymmetricDifference<'_, T, S1, S2>
+impl<T, S1, S2, Idx> DoubleEndedIterator for SymmetricDifference<'_, T, S1, S2, Idx>
 where
     T: Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.iter.next_back()
     }
 }
 
-impl<T, S1, S2> Clone for SymmetricDifference<'_, T, S1, S2> {
+impl<T, S1, S2, Idx> Clone for SymmetricDifference<'_, T, S1, S2, Idx> {
     fn clone(&self) -> Self {
         SymmetricDifference {
             iter: self.iter.clone(),
@@ -1097,11 +1131,12 @@ impl<T, S1, S2> Clone for SymmetricDifference<'_, T, S1, S2> {
     }
 }
 
-impl<T, S1, S2> fmt::Debug for SymmetricDifference<'_, T, S1, S2>
+impl<T, S1, S2, Idx> fmt::Debug for SymmetricDifference<'_, T, S1, S2, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
@@ -1115,14 +1150,15 @@ where
 ///
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`union`]: struct.IndexSet.html#method.union
-pub struct Union<'a, T, S> {
-    iter: Chain<Iter<'a, T>, Difference<'a, T, S>>,
+pub struct Union<'a, T, S, Idx = usize> {
+    iter: Chain<Iter<'a, T>, Difference<'a, T, S, Idx>>,
 }
 
-impl<'a, T, S> Iterator for Union<'a, T, S>
+impl<'a, T, S, Idx> Iterator for Union<'a, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -1142,17 +1178,18 @@ where
     }
 }
 
-impl<T, S> DoubleEndedIterator for Union<'_, T, S>
+impl<T, S, Idx> DoubleEndedIterator for Union<'_, T, S, Idx>
 where
     T: Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn next_back(&mut self) -> Option<Self::Item> {
         self.iter.next_back()
     }
 }
 
-impl<T, S> Clone for Union<'_, T, S> {
+impl<T, S, Idx> Clone for Union<'_, T, S, Idx> {
     fn clone(&self) -> Self {
         Union {
             iter: self.iter.clone(),
@@ -1160,78 +1197,83 @@ impl<T, S> Clone for Union<'_, T, S> {
     }
 }
 
-impl<T, S> fmt::Debug for Union<'_, T, S>
+impl<T, S, Idx> fmt::Debug for Union<'_, T, S, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.clone()).finish()
     }
 }
 
-impl<T, S1, S2> BitAnd<&IndexSet<T, S2>> for &IndexSet<T, S1>
+impl<T, S1, S2, Idx> BitAnd<&IndexSet<T, S2, Idx>> for &IndexSet<T, S1, Idx>
 where
     T: Eq + Hash + Clone,
     S1: BuildHasher + Default,
     S2: BuildHasher,
+    Idx: Indexable,
 {
-    type Output = IndexSet<T, S1>;
+    type Output = IndexSet<T, S1, Idx>;
 
     /// Returns the set intersection, cloned into a new set.
     ///
     /// Values are collected in the same order that they appear in `self`.
-    fn bitand(self, other: &IndexSet<T, S2>) -> Self::Output {
+    fn bitand(self, other: &IndexSet<T, S2, Idx>) -> Self::Output {
         self.intersection(other).cloned().collect()
     }
 }
 
-impl<T, S1, S2> BitOr<&IndexSet<T, S2>> for &IndexSet<T, S1>
+impl<T, S1, S2, Idx> BitOr<&IndexSet<T, S2, Idx>> for &IndexSet<T, S1, Idx>
 where
     T: Eq + Hash + Clone,
     S1: BuildHasher + Default,
     S2: BuildHasher,
+    Idx: Indexable,
 {
-    type Output = IndexSet<T, S1>;
+    type Output = IndexSet<T, S1, Idx>;
 
     /// Returns the set union, cloned into a new set.
     ///
     /// Values from `self` are collected in their original order, followed by
     /// values that are unique to `other` in their original order.
-    fn bitor(self, other: &IndexSet<T, S2>) -> Self::Output {
+    fn bitor(self, other: &IndexSet<T, S2, Idx>) -> Self::Output {
         self.union(other).cloned().collect()
     }
 }
 
-impl<T, S1, S2> BitXor<&IndexSet<T, S2>> for &IndexSet<T, S1>
+impl<T, S1, S2, Idx> BitXor<&IndexSet<T, S2, Idx>> for &IndexSet<T, S1, Idx>
 where
     T: Eq + Hash + Clone,
     S1: BuildHasher + Default,
     S2: BuildHasher,
+    Idx: Indexable,
 {
-    type Output = IndexSet<T, S1>;
+    type Output = IndexSet<T, S1, Idx>;
 
     /// Returns the set symmetric-difference, cloned into a new set.
     ///
     /// Values from `self` are collected in their original order, followed by
     /// values from `other` in their original order.
-    fn bitxor(self, other: &IndexSet<T, S2>) -> Self::Output {
+    fn bitxor(self, other: &IndexSet<T, S2, Idx>) -> Self::Output {
         self.symmetric_difference(other).cloned().collect()
     }
 }
 
-impl<T, S1, S2> Sub<&IndexSet<T, S2>> for &IndexSet<T, S1>
+impl<T, S1, S2, Idx> Sub<&IndexSet<T, S2, Idx>> for &IndexSet<T, S1, Idx>
 where
     T: Eq + Hash + Clone,
     S1: BuildHasher + Default,
     S2: BuildHasher,
+    Idx: Indexable,
 {
-    type Output = IndexSet<T, S1>;
+    type Output = IndexSet<T, S1, Idx>;
 
     /// Returns the set difference, cloned into a new set.
     ///
     /// Values are collected in the same order that they appear in `self`.
-    fn sub(self, other: &IndexSet<T, S2>) -> Self::Output {
+    fn sub(self, other: &IndexSet<T, S2, Idx>) -> Self::Output {
         self.difference(other).cloned().collect()
     }
 }

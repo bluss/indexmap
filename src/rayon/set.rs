@@ -16,11 +16,13 @@ use core::hash::{BuildHasher, Hash};
 
 use crate::Entries;
 use crate::IndexSet;
+use crate::Indexable;
+use crate::WithEntries;
 
 type Bucket<T> = crate::Bucket<T, ()>;
 
 /// Requires crate feature `"rayon"`.
-impl<T, S> IntoParallelIterator for IndexSet<T, S>
+impl<T, S, Idx> IntoParallelIterator for IndexSet<T, S, Idx>
 where
     T: Send,
 {
@@ -63,7 +65,7 @@ impl<T: Send> IndexedParallelIterator for IntoParIter<T> {
 }
 
 /// Requires crate feature `"rayon"`.
-impl<'a, T, S> IntoParallelIterator for &'a IndexSet<T, S>
+impl<'a, T, S, Idx> IntoParallelIterator for &'a IndexSet<T, S, Idx>
 where
     T: Sync,
 {
@@ -116,10 +118,11 @@ impl<T: Sync> IndexedParallelIterator for ParIter<'_, T> {
 /// The following methods **require crate feature `"rayon"`**.
 ///
 /// See also the `IntoParallelIterator` implementations.
-impl<T, S> IndexSet<T, S>
+impl<T, S, Idx> IndexSet<T, S, Idx>
 where
     T: Hash + Eq + Sync,
     S: BuildHasher + Sync,
+    Idx: Indexable,
 {
     /// Return a parallel iterator over the values that are in `self` but not `other`.
     ///
@@ -127,8 +130,8 @@ where
     /// in the `self` set is still preserved for operations like `reduce` and `collect`.
     pub fn par_difference<'a, S2>(
         &'a self,
-        other: &'a IndexSet<T, S2>,
-    ) -> ParDifference<'a, T, S, S2>
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> ParDifference<'a, T, S, S2, Idx>
     where
         S2: BuildHasher + Sync,
     {
@@ -147,8 +150,8 @@ where
     /// values from `other` in their original order.
     pub fn par_symmetric_difference<'a, S2>(
         &'a self,
-        other: &'a IndexSet<T, S2>,
-    ) -> ParSymmetricDifference<'a, T, S, S2>
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> ParSymmetricDifference<'a, T, S, S2, Idx>
     where
         S2: BuildHasher + Sync,
     {
@@ -164,8 +167,8 @@ where
     /// in the `self` set is still preserved for operations like `reduce` and `collect`.
     pub fn par_intersection<'a, S2>(
         &'a self,
-        other: &'a IndexSet<T, S2>,
-    ) -> ParIntersection<'a, T, S, S2>
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> ParIntersection<'a, T, S, S2, Idx>
     where
         S2: BuildHasher + Sync,
     {
@@ -181,7 +184,10 @@ where
     /// in the sets is still preserved for operations like `reduce` and `collect`.
     /// Values from `self` are produced in their original order, followed by
     /// values that are unique to `other` in their original order.
-    pub fn par_union<'a, S2>(&'a self, other: &'a IndexSet<T, S2>) -> ParUnion<'a, T, S, S2>
+    pub fn par_union<'a, S2>(
+        &'a self,
+        other: &'a IndexSet<T, S2, Idx>,
+    ) -> ParUnion<'a, T, S, S2, Idx>
     where
         S2: BuildHasher + Sync,
     {
@@ -193,7 +199,7 @@ where
 
     /// Returns `true` if `self` contains all of the same values as `other`,
     /// regardless of each set's indexed order, determined in parallel.
-    pub fn par_eq<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn par_eq<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher + Sync,
     {
@@ -202,7 +208,7 @@ where
 
     /// Returns `true` if `self` has no elements in common with `other`,
     /// determined in parallel.
-    pub fn par_is_disjoint<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn par_is_disjoint<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher + Sync,
     {
@@ -215,7 +221,7 @@ where
 
     /// Returns `true` if all elements of `other` are contained in `self`,
     /// determined in parallel.
-    pub fn par_is_superset<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn par_is_superset<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher + Sync,
     {
@@ -224,7 +230,7 @@ where
 
     /// Returns `true` if all elements of `self` are contained in `other`,
     /// determined in parallel.
-    pub fn par_is_subset<S2>(&self, other: &IndexSet<T, S2>) -> bool
+    pub fn par_is_subset<S2>(&self, other: &IndexSet<T, S2, Idx>) -> bool
     where
         S2: BuildHasher + Sync,
     {
@@ -239,22 +245,23 @@ where
 ///
 /// [`IndexSet`]: ../struct.IndexSet.html
 /// [`par_difference`]: ../struct.IndexSet.html#method.par_difference
-pub struct ParDifference<'a, T, S1, S2> {
-    set1: &'a IndexSet<T, S1>,
-    set2: &'a IndexSet<T, S2>,
+pub struct ParDifference<'a, T, S1, S2, Idx = usize> {
+    set1: &'a IndexSet<T, S1, Idx>,
+    set2: &'a IndexSet<T, S2, Idx>,
 }
 
-impl<T, S1, S2> Clone for ParDifference<'_, T, S1, S2> {
+impl<T, S1, S2, Idx> Clone for ParDifference<'_, T, S1, S2, Idx> {
     fn clone(&self) -> Self {
         ParDifference { ..*self }
     }
 }
 
-impl<T, S1, S2> fmt::Debug for ParDifference<'_, T, S1, S2>
+impl<T, S1, S2, Idx> fmt::Debug for ParDifference<'_, T, S1, S2, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
@@ -263,11 +270,12 @@ where
     }
 }
 
-impl<'a, T, S1, S2> ParallelIterator for ParDifference<'a, T, S1, S2>
+impl<'a, T, S1, S2, Idx> ParallelIterator for ParDifference<'a, T, S1, S2, Idx>
 where
     T: Hash + Eq + Sync,
     S1: BuildHasher + Sync,
     S2: BuildHasher + Sync,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -290,22 +298,23 @@ where
 ///
 /// [`IndexSet`]: ../struct.IndexSet.html
 /// [`par_intersection`]: ../struct.IndexSet.html#method.par_intersection
-pub struct ParIntersection<'a, T, S1, S2> {
-    set1: &'a IndexSet<T, S1>,
-    set2: &'a IndexSet<T, S2>,
+pub struct ParIntersection<'a, T, S1, S2, Idx = usize> {
+    set1: &'a IndexSet<T, S1, Idx>,
+    set2: &'a IndexSet<T, S2, Idx>,
 }
 
-impl<T, S1, S2> Clone for ParIntersection<'_, T, S1, S2> {
+impl<T, S1, S2, Idx> Clone for ParIntersection<'_, T, S1, S2, Idx> {
     fn clone(&self) -> Self {
         ParIntersection { ..*self }
     }
 }
 
-impl<T, S1, S2> fmt::Debug for ParIntersection<'_, T, S1, S2>
+impl<T, S1, S2, Idx> fmt::Debug for ParIntersection<'_, T, S1, S2, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
@@ -314,11 +323,12 @@ where
     }
 }
 
-impl<'a, T, S1, S2> ParallelIterator for ParIntersection<'a, T, S1, S2>
+impl<'a, T, S1, S2, Idx> ParallelIterator for ParIntersection<'a, T, S1, S2, Idx>
 where
     T: Hash + Eq + Sync,
     S1: BuildHasher + Sync,
     S2: BuildHasher + Sync,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -341,22 +351,23 @@ where
 ///
 /// [`IndexSet`]: ../struct.IndexSet.html
 /// [`par_symmetric_difference`]: ../struct.IndexSet.html#method.par_symmetric_difference
-pub struct ParSymmetricDifference<'a, T, S1, S2> {
-    set1: &'a IndexSet<T, S1>,
-    set2: &'a IndexSet<T, S2>,
+pub struct ParSymmetricDifference<'a, T, S1, S2, Idx = usize> {
+    set1: &'a IndexSet<T, S1, Idx>,
+    set2: &'a IndexSet<T, S2, Idx>,
 }
 
-impl<T, S1, S2> Clone for ParSymmetricDifference<'_, T, S1, S2> {
+impl<T, S1, S2, Idx> Clone for ParSymmetricDifference<'_, T, S1, S2, Idx> {
     fn clone(&self) -> Self {
         ParSymmetricDifference { ..*self }
     }
 }
 
-impl<T, S1, S2> fmt::Debug for ParSymmetricDifference<'_, T, S1, S2>
+impl<T, S1, S2, Idx> fmt::Debug for ParSymmetricDifference<'_, T, S1, S2, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list()
@@ -365,11 +376,12 @@ where
     }
 }
 
-impl<'a, T, S1, S2> ParallelIterator for ParSymmetricDifference<'a, T, S1, S2>
+impl<'a, T, S1, S2, Idx> ParallelIterator for ParSymmetricDifference<'a, T, S1, S2, Idx>
 where
     T: Hash + Eq + Sync,
     S1: BuildHasher + Sync,
     S2: BuildHasher + Sync,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -392,33 +404,35 @@ where
 ///
 /// [`IndexSet`]: ../struct.IndexSet.html
 /// [`par_union`]: ../struct.IndexSet.html#method.par_union
-pub struct ParUnion<'a, T, S1, S2> {
-    set1: &'a IndexSet<T, S1>,
-    set2: &'a IndexSet<T, S2>,
+pub struct ParUnion<'a, T, S1, S2, Idx = usize> {
+    set1: &'a IndexSet<T, S1, Idx>,
+    set2: &'a IndexSet<T, S2, Idx>,
 }
 
-impl<T, S1, S2> Clone for ParUnion<'_, T, S1, S2> {
+impl<T, S1, S2, Idx> Clone for ParUnion<'_, T, S1, S2, Idx> {
     fn clone(&self) -> Self {
         ParUnion { ..*self }
     }
 }
 
-impl<T, S1, S2> fmt::Debug for ParUnion<'_, T, S1, S2>
+impl<T, S1, S2, Idx> fmt::Debug for ParUnion<'_, T, S1, S2, Idx>
 where
     T: fmt::Debug + Eq + Hash,
     S1: BuildHasher,
     S2: BuildHasher,
+    Idx: Indexable,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self.set1.union(&self.set2)).finish()
     }
 }
 
-impl<'a, T, S1, S2> ParallelIterator for ParUnion<'a, T, S1, S2>
+impl<'a, T, S1, S2, Idx> ParallelIterator for ParUnion<'a, T, S1, S2, Idx>
 where
     T: Hash + Eq + Sync,
     S1: BuildHasher + Sync,
     S2: BuildHasher + Sync,
+    Idx: Indexable,
 {
     type Item = &'a T;
 
@@ -437,10 +451,11 @@ where
 /// Parallel sorting methods.
 ///
 /// The following methods **require crate feature `"rayon"`**.
-impl<T, S> IndexSet<T, S>
+impl<T, S, Idx> IndexSet<T, S, Idx>
 where
     T: Hash + Eq + Send,
     S: BuildHasher + Send,
+    Idx: Indexable,
 {
     /// Sort the set’s values in parallel by their default ordering.
     pub fn par_sort(&mut self)
@@ -475,10 +490,11 @@ where
 }
 
 /// Requires crate feature `"rayon"`.
-impl<T, S> FromParallelIterator<T> for IndexSet<T, S>
+impl<T, S, Idx> FromParallelIterator<T> for IndexSet<T, S, Idx>
 where
     T: Eq + Hash + Send,
     S: BuildHasher + Default + Send,
+    Idx: Indexable,
 {
     fn from_par_iter<I>(iter: I) -> Self
     where
@@ -495,10 +511,11 @@ where
 }
 
 /// Requires crate feature `"rayon"`.
-impl<T, S> ParallelExtend<T> for IndexSet<T, S>
+impl<T, S, Idx> ParallelExtend<T> for IndexSet<T, S, Idx>
 where
     T: Eq + Hash + Send,
     S: BuildHasher + Send,
+    Idx: Indexable,
 {
     fn par_extend<I>(&mut self, iter: I)
     where
@@ -511,10 +528,11 @@ where
 }
 
 /// Requires crate feature `"rayon"`.
-impl<'a, T: 'a, S> ParallelExtend<&'a T> for IndexSet<T, S>
+impl<'a, T: 'a, S, Idx> ParallelExtend<&'a T> for IndexSet<T, S, Idx>
 where
     T: Copy + Eq + Hash + Send + Sync,
     S: BuildHasher + Send,
+    Idx: Indexable,
 {
     fn par_extend<I>(&mut self, iter: I)
     where
