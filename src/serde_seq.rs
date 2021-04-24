@@ -28,6 +28,7 @@ use core::hash::{BuildHasher, Hash};
 use core::marker::PhantomData;
 
 use crate::IndexMap;
+use crate::Indexable;
 
 /// Serializes an `IndexMap` as an ordered sequence.
 ///
@@ -45,26 +46,31 @@ use crate::IndexMap;
 /// ```
 ///
 /// Requires crate feature `"serde"` or `"serde-1"`
-pub fn serialize<K, V, S, T>(map: &IndexMap<K, V, S>, serializer: T) -> Result<T::Ok, T::Error>
+pub fn serialize<K, V, S, Idx, T>(
+    map: &IndexMap<K, V, S, Idx>,
+    serializer: T,
+) -> Result<T::Ok, T::Error>
 where
     K: Serialize + Hash + Eq,
     V: Serialize,
     S: BuildHasher,
+    Idx: Indexable,
     T: Serializer,
 {
     serializer.collect_seq(map)
 }
 
 /// Visitor to deserialize a *sequenced* `IndexMap`
-struct SeqVisitor<K, V, S>(PhantomData<(K, V, S)>);
+struct SeqVisitor<K, V, S, Idx>(PhantomData<(K, V, S, Idx)>);
 
-impl<'de, K, V, S> Visitor<'de> for SeqVisitor<K, V, S>
+impl<'de, K, V, S, Idx> Visitor<'de> for SeqVisitor<K, V, S, Idx>
 where
     K: Deserialize<'de> + Eq + Hash,
     V: Deserialize<'de>,
     S: Default + BuildHasher,
+    Idx: Indexable,
 {
-    type Value = IndexMap<K, V, S>;
+    type Value = IndexMap<K, V, S, Idx>;
 
     fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "a sequenced map")
@@ -101,12 +107,15 @@ where
 /// ```
 ///
 /// Requires crate feature `"serde"` or `"serde-1"`
-pub fn deserialize<'de, D, K, V, S>(deserializer: D) -> Result<IndexMap<K, V, S>, D::Error>
+pub fn deserialize<'de, D, K, V, S, Idx>(
+    deserializer: D,
+) -> Result<IndexMap<K, V, S, Idx>, D::Error>
 where
     D: Deserializer<'de>,
     K: Deserialize<'de> + Eq + Hash,
     V: Deserialize<'de>,
     S: Default + BuildHasher,
+    Idx: Indexable,
 {
     deserializer.deserialize_seq(SeqVisitor(PhantomData))
 }

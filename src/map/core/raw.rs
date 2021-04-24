@@ -2,15 +2,15 @@
 //! This module encapsulates the `unsafe` access to `hashbrown::raw::RawTable`,
 //! mostly in dealing with its bucket "pointers".
 
-use super::{equivalent, Entry, HashValue, IndexMapCore, VacantEntry};
+use super::{equivalent, Entry, HashValue, IndexMapCore, Indexable, VacantEntry};
 use core::fmt;
 use core::mem::replace;
 use hashbrown::raw::RawTable;
 
-type RawBucket = hashbrown::raw::Bucket<usize>;
+type RawBucket<Idx> = hashbrown::raw::Bucket<Idx>;
 
-pub(super) struct DebugIndices<'a>(pub &'a RawTable<usize>);
-impl fmt::Debug for DebugIndices<'_> {
+pub(super) struct DebugIndices<'a, Idx>(pub &'a RawTable<Idx>);
+impl<Idx: fmt::Debug> fmt::Debug for DebugIndices<'_, Idx> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // SAFETY: we're not letting any of the buckets escape this function
         let indices = unsafe { self.0.iter().map(|raw_bucket| raw_bucket.read()) };
@@ -18,16 +18,18 @@ impl fmt::Debug for DebugIndices<'_> {
     }
 }
 
-impl<K, V> IndexMapCore<K, V> {
+impl<K, V, Idx: Indexable> IndexMapCore<K, V, Idx> {
     /// Sweep the whole table to erase indices start..end
     pub(super) fn erase_indices_sweep(&mut self, start: usize, end: usize) {
+        let offset = end - start;
+        let start = Idx::from_usize(start);
+        let end = Idx::from_usize(end);
         // SAFETY: we're not letting any of the buckets escape this function
         unsafe {
-            let offset = end - start;
             for bucket in self.indices.iter() {
                 let i = bucket.read();
                 if i >= end {
-                    bucket.write(i - offset);
+                    bucket.write(Idx::from_usize(i.into_usize() - offset));
                 } else if i >= start {
                     self.indices.erase(bucket);
                 }
@@ -35,7 +37,7 @@ impl<K, V> IndexMapCore<K, V> {
         }
     }
 
-    pub(crate) fn entry(&mut self, hash: HashValue, key: K) -> Entry<'_, K, V>
+    pub(crate) fn entry(&mut self, hash: HashValue, key: K) -> Entry<'_, K, V, Idx>
     where
         K: Eq,
     {
@@ -56,23 +58,23 @@ impl<K, V> IndexMapCore<K, V> {
         }
     }
 
-    pub(super) fn indices_mut(&mut self) -> impl Iterator<Item = &mut usize> {
+    pub(super) fn indices_mut(&mut self) -> impl Iterator<Item = &mut Idx> {
         // SAFETY: we're not letting any of the buckets escape this function,
         // only the item references that are appropriately bound to `&mut self`.
         unsafe { self.indices.iter().map(|bucket| bucket.as_mut()) }
     }
 
     /// Return the raw bucket for the given index
-    fn find_index(&self, index: usize) -> RawBucket {
+    fn find_index(&self, index: Idx) -> RawBucket<Idx> {
         // We'll get a "nice" bounds-check from indexing `self.entries`,
         // and then we expect to find it in the table as well.
-        let hash = self.entries[index].hash.get();
+        let hash = self.entries[index.into_usize()].hash.get();
         self.indices
             .find(hash, move |&i| i == index)
             .expect("index not found")
     }
 
-    pub(crate) fn swap_indices(&mut self, a: usize, b: usize) {
+    pub(crate) fn swap_indices(&mut self, a: Idx, b: Idx) {
         // SAFETY: Can't take two `get_mut` references from one table, so we
         // must use raw buckets to do the swap. This is still safe because we
         // are locally sure they won't dangle, and we write them individually.
@@ -82,7 +84,7 @@ impl<K, V> IndexMapCore<K, V> {
             raw_bucket_a.write(b);
             raw_bucket_b.write(a);
         }
-        self.entries.swap(a, b);
+        self.entries.swap(a.into_usize(), b.into_usize());
     }
 }
 
@@ -92,30 +94,30 @@ impl<K, V> IndexMapCore<K, V> {
 /// [`Entry`]: enum.Entry.html
 // SAFETY: The lifetime of the map reference also constrains the raw bucket,
 // which is essentially a raw pointer into the map indices.
-pub struct OccupiedEntry<'a, K, V> {
-    map: &'a mut IndexMapCore<K, V>,
-    raw_bucket: RawBucket,
+pub struct OccupiedEntry<'a, K, V, Idx = usize> {
+    map: &'a mut IndexMapCore<K, V, Idx>,
+    raw_bucket: RawBucket<Idx>,
     key: K,
 }
 
 // `hashbrown::raw::Bucket` is only `Send`, not `Sync`.
 // SAFETY: `&self` only accesses the bucket to read it.
-unsafe impl<K: Sync, V: Sync> Sync for OccupiedEntry<'_, K, V> {}
+unsafe impl<K: Sync, V: Sync, Idx: Sync> Sync for OccupiedEntry<'_, K, V, Idx> {}
 
 // The parent module also adds methods that don't threaten the unsafe encapsulation.
-impl<'a, K, V> OccupiedEntry<'a, K, V> {
+impl<'a, K, V, Idx: Indexable> OccupiedEntry<'a, K, V, Idx> {
     /// Gets a reference to the entry's key in the map.
     ///
     /// Note that this is not the key that was used to find the entry. There may be an observable
     /// difference if the key type has any distinguishing features outside of `Hash` and `Eq`, like
     /// extra fields or the memory address of an allocation.
     pub fn key(&self) -> &K {
-        &self.map.entries[self.index()].key
+        &self.map.entries[self.index_usize()].key
     }
 
     /// Gets a reference to the entry's value in the map.
     pub fn get(&self) -> &V {
-        &self.map.entries[self.index()].value
+        &self.map.entries[self.index_usize()].value
     }
 
     /// Gets a mutable reference to the entry's value in the map.
@@ -123,28 +125,33 @@ impl<'a, K, V> OccupiedEntry<'a, K, V> {
     /// If you need a reference which may outlive the destruction of the
     /// `Entry` value, see `into_mut`.
     pub fn get_mut(&mut self) -> &mut V {
-        let index = self.index();
+        let index = self.index_usize();
         &mut self.map.entries[index].value
     }
 
     /// Put the new key in the occupied entry's key slot
     pub(crate) fn replace_key(self) -> K {
-        let index = self.index();
+        let index = self.index_usize();
         let old_key = &mut self.map.entries[index].key;
         replace(old_key, self.key)
     }
 
     /// Return the index of the key-value pair
     #[inline]
-    pub fn index(&self) -> usize {
+    pub fn index(&self) -> Idx {
         // SAFETY: we have &mut map keep keeping the bucket stable
         unsafe { self.raw_bucket.read() }
+    }
+
+    #[inline]
+    fn index_usize(&self) -> usize {
+        self.index().into_usize()
     }
 
     /// Converts into a mutable reference to the entry's value in the map,
     /// with a lifetime bound to the map itself.
     pub fn into_mut(self) -> &'a mut V {
-        let index = self.index();
+        let index = self.index_usize();
         &mut self.map.entries[index].value
     }
 
