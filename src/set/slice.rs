@@ -1,9 +1,10 @@
 use super::{Bucket, Entries, IndexSet, Iter};
+use crate::util::simplify_range;
 
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
-use core::ops::{self, Index};
+use core::ops::{self, Bound, Index};
 
 /// A dynamically-sized slice of values in an `IndexSet`.
 ///
@@ -191,3 +192,25 @@ impl_index!(
     ops::RangeTo<usize>,
     ops::RangeToInclusive<usize>
 );
+
+// NB: with MSRV 1.53, we can forward `Bound` pairs to direct slice indexing like other ranges
+
+impl<T, S> Index<(Bound<usize>, Bound<usize>)> for IndexSet<T, S> {
+    type Output = Slice<T>;
+
+    fn index(&self, range: (Bound<usize>, Bound<usize>)) -> &Self::Output {
+        let entries = self.as_entries();
+        let range = simplify_range(range, entries.len());
+        Slice::from_slice(&entries[range])
+    }
+}
+
+impl<T> Index<(Bound<usize>, Bound<usize>)> for Slice<T> {
+    type Output = Self;
+
+    fn index(&self, range: (Bound<usize>, Bound<usize>)) -> &Self::Output {
+        let entries = &self.entries;
+        let range = simplify_range(range, entries.len());
+        Slice::from_slice(&entries[range])
+    }
+}

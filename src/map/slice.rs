@@ -1,9 +1,10 @@
 use super::{Bucket, Entries, IndexMap, Iter, IterMut, Keys, Values, ValuesMut};
+use crate::util::simplify_range;
 
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
-use core::ops::{self, Index, IndexMut};
+use core::ops::{self, Bound, Index, IndexMut};
 
 /// A dynamically-sized slice of key-value pairs in an `IndexMap`.
 ///
@@ -317,3 +318,41 @@ impl_index!(
     ops::RangeTo<usize>,
     ops::RangeToInclusive<usize>
 );
+
+// NB: with MSRV 1.53, we can forward `Bound` pairs to direct slice indexing like other ranges
+
+impl<K, V, S> Index<(Bound<usize>, Bound<usize>)> for IndexMap<K, V, S> {
+    type Output = Slice<K, V>;
+
+    fn index(&self, range: (Bound<usize>, Bound<usize>)) -> &Self::Output {
+        let entries = self.as_entries();
+        let range = simplify_range(range, entries.len());
+        Slice::from_slice(&entries[range])
+    }
+}
+
+impl<K, V, S> IndexMut<(Bound<usize>, Bound<usize>)> for IndexMap<K, V, S> {
+    fn index_mut(&mut self, range: (Bound<usize>, Bound<usize>)) -> &mut Self::Output {
+        let entries = self.as_entries_mut();
+        let range = simplify_range(range, entries.len());
+        Slice::from_mut_slice(&mut entries[range])
+    }
+}
+
+impl<K, V> Index<(Bound<usize>, Bound<usize>)> for Slice<K, V> {
+    type Output = Slice<K, V>;
+
+    fn index(&self, range: (Bound<usize>, Bound<usize>)) -> &Self {
+        let entries = &self.entries;
+        let range = simplify_range(range, entries.len());
+        Slice::from_slice(&entries[range])
+    }
+}
+
+impl<K, V> IndexMut<(Bound<usize>, Bound<usize>)> for Slice<K, V> {
+    fn index_mut(&mut self, range: (Bound<usize>, Bound<usize>)) -> &mut Self {
+        let entries = &mut self.entries;
+        let range = simplify_range(range, entries.len());
+        Slice::from_mut_slice(&mut entries[range])
+    }
+}
