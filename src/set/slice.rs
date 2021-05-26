@@ -1,10 +1,10 @@
 use super::{Bucket, Entries, IndexSet, Iter};
-use crate::util::simplify_range;
+use crate::util::{simplify_range, try_simplify_range};
 
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
-use core::ops::{self, Bound, Index};
+use core::ops::{self, Bound, Index, RangeBounds};
 
 /// A dynamically-sized slice of values in an `IndexSet`.
 ///
@@ -32,6 +32,15 @@ impl<T, S> IndexSet<T, S> {
     pub fn as_slice(&self) -> &Slice<T> {
         Slice::from_slice(self.as_entries())
     }
+
+    /// Returns a slice of values in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<T>> {
+        let entries = self.as_entries();
+        let range = try_simplify_range(range, entries.len())?;
+        entries.get(range).map(Slice::from_slice)
+    }
 }
 
 impl<'a, T> Iter<'a, T> {
@@ -57,6 +66,14 @@ impl<T> Slice<T> {
     /// Valid indices are *0 <= index < self.len()*
     pub fn get_index(&self, index: usize) -> Option<&T> {
         self.entries.get(index).map(Bucket::key_ref)
+    }
+
+    /// Returns a slice of values in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Self> {
+        let range = try_simplify_range(range, self.entries.len())?;
+        self.entries.get(range).map(Self::from_slice)
     }
 
     /// Get the first value.

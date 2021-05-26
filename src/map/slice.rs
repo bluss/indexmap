@@ -1,10 +1,10 @@
 use super::{Bucket, Entries, IndexMap, Iter, IterMut, Keys, Values, ValuesMut};
-use crate::util::simplify_range;
+use crate::util::{simplify_range, try_simplify_range};
 
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{Hash, Hasher};
-use core::ops::{self, Bound, Index, IndexMut};
+use core::ops::{self, Bound, Index, IndexMut, RangeBounds};
 
 /// A dynamically-sized slice of key-value pairs in an `IndexMap`.
 ///
@@ -42,6 +42,24 @@ impl<K, V, S> IndexMap<K, V, S> {
     /// Returns a mutable slice of all the entries in the map.
     pub fn as_mut_slice(&mut self) -> &mut Slice<K, V> {
         Slice::from_mut_slice(self.as_entries_mut())
+    }
+
+    /// Returns a slice of entries in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<K, V>> {
+        let entries = self.as_entries();
+        let range = try_simplify_range(range, entries.len())?;
+        entries.get(range).map(Slice::from_slice)
+    }
+
+    /// Returns a mutable slice of entries in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> Option<&mut Slice<K, V>> {
+        let entries = self.as_entries_mut();
+        let range = try_simplify_range(range, entries.len())?;
+        entries.get_mut(range).map(Slice::from_mut_slice)
     }
 }
 
@@ -88,6 +106,22 @@ impl<K, V> Slice<K, V> {
         // NB: we're not returning `&mut K` like `IndexMap::get_index_mut`,
         // because that was a mistake that should have required `MutableKeys`.
         self.entries.get_mut(index).map(Bucket::ref_mut)
+    }
+
+    /// Returns a slice of key-value pairs in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Self> {
+        let range = try_simplify_range(range, self.entries.len())?;
+        self.entries.get(range).map(Slice::from_slice)
+    }
+
+    /// Returns a mutable slice of key-value pairs in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    pub fn get_range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> Option<&mut Self> {
+        let range = try_simplify_range(range, self.entries.len())?;
+        self.entries.get_mut(range).map(Slice::from_mut_slice)
     }
 
     /// Get the first key-value pair.
