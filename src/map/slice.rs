@@ -20,62 +20,16 @@ pub struct Slice<K, V> {
 
 #[allow(unsafe_code)]
 impl<K, V> Slice<K, V> {
-    fn from_slice(entries: &[Bucket<K, V>]) -> &Self {
+    pub(super) fn from_slice(entries: &[Bucket<K, V>]) -> &Self {
         // SAFETY: `Slice<K, V>` is a transparent wrapper around `[Bucket<K, V>]`,
         // and the lifetimes are bound together by this function's signature.
         unsafe { &*(entries as *const [Bucket<K, V>] as *const Self) }
     }
 
-    fn from_mut_slice(entries: &mut [Bucket<K, V>]) -> &mut Self {
+    pub(super) fn from_mut_slice(entries: &mut [Bucket<K, V>]) -> &mut Self {
         // SAFETY: `Slice<K, V>` is a transparent wrapper around `[Bucket<K, V>]`,
         // and the lifetimes are bound together by this function's signature.
         unsafe { &mut *(entries as *mut [Bucket<K, V>] as *mut Self) }
-    }
-}
-
-impl<K, V, S> IndexMap<K, V, S> {
-    /// Returns a slice of all the entries in the map.
-    pub fn as_slice(&self) -> &Slice<K, V> {
-        Slice::from_slice(self.as_entries())
-    }
-
-    /// Returns a mutable slice of all the entries in the map.
-    pub fn as_mut_slice(&mut self) -> &mut Slice<K, V> {
-        Slice::from_mut_slice(self.as_entries_mut())
-    }
-
-    /// Returns a slice of entries in the given range of indices.
-    ///
-    /// Valid indices are *0 <= index < self.len()*
-    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<K, V>> {
-        let entries = self.as_entries();
-        let range = try_simplify_range(range, entries.len())?;
-        entries.get(range).map(Slice::from_slice)
-    }
-
-    /// Returns a mutable slice of entries in the given range of indices.
-    ///
-    /// Valid indices are *0 <= index < self.len()*
-    pub fn get_range_mut<R: RangeBounds<usize>>(&mut self, range: R) -> Option<&mut Slice<K, V>> {
-        let entries = self.as_entries_mut();
-        let range = try_simplify_range(range, entries.len())?;
-        entries.get_mut(range).map(Slice::from_mut_slice)
-    }
-}
-
-impl<'a, K, V> Iter<'a, K, V> {
-    /// Returns a slice of the remaining entries in the iterator.
-    pub fn as_slice(&self) -> &'a Slice<K, V> {
-        Slice::from_slice(self.iter.as_slice())
-    }
-}
-
-impl<'a, K, V> IterMut<'a, K, V> {
-    /// Returns a slice of the remaining entries in the iterator.
-    ///
-    /// To avoid creating `&mut` references that alias, this is forced to consume the iterator.
-    pub fn into_slice(self) -> &'a mut Slice<K, V> {
-        Slice::from_mut_slice(self.iter.into_slice())
     }
 }
 

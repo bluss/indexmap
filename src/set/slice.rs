@@ -20,33 +20,10 @@ pub struct Slice<T> {
 
 #[allow(unsafe_code)]
 impl<T> Slice<T> {
-    fn from_slice(entries: &[Bucket<T>]) -> &Self {
+    pub(super) fn from_slice(entries: &[Bucket<T>]) -> &Self {
         // SAFETY: `Slice<T>` is a transparent wrapper around `[Bucket<T>]`,
         // and the lifetimes are bound together by this function's signature.
         unsafe { &*(entries as *const [Bucket<T>] as *const Self) }
-    }
-}
-
-impl<T, S> IndexSet<T, S> {
-    /// Returns a slice of all the values in the set.
-    pub fn as_slice(&self) -> &Slice<T> {
-        Slice::from_slice(self.as_entries())
-    }
-
-    /// Returns a slice of values in the given range of indices.
-    ///
-    /// Valid indices are *0 <= index < self.len()*
-    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<T>> {
-        let entries = self.as_entries();
-        let range = try_simplify_range(range, entries.len())?;
-        entries.get(range).map(Slice::from_slice)
-    }
-}
-
-impl<'a, T> Iter<'a, T> {
-    /// Returns a slice of the remaining entries in the iterator.
-    pub fn as_slice(&self) -> &'a Slice<T> {
-        Slice::from_slice(self.iter.as_slice())
     }
 }
 
