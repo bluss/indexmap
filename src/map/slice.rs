@@ -260,6 +260,12 @@ impl<K, V> Default for &'_ Slice<K, V> {
     }
 }
 
+impl<K, V> Default for &'_ mut Slice<K, V> {
+    fn default() -> Self {
+        Slice::from_mut_slice(&mut [])
+    }
+}
+
 impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for Slice<K, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_list().entries(self).finish()
