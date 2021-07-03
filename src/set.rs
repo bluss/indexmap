@@ -1,18 +1,23 @@
 //! A hash set implemented using `IndexMap`
 
+mod slice;
+
+pub use self::slice::Slice;
+
 #[cfg(feature = "rayon")]
 pub use crate::rayon::set as rayon;
 
 #[cfg(has_std)]
 use std::collections::hash_map::RandomState;
 
+use crate::util::try_simplify_range;
 use crate::vec::{self, Vec};
 use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{BuildHasher, Hash};
 use core::iter::{Chain, FromIterator};
 use core::ops::{BitAnd, BitOr, BitXor, Index, RangeBounds, Sub};
-use core::slice;
+use core::slice::Iter as SliceIter;
 
 use super::{Entries, Equivalent, IndexMap};
 
@@ -189,7 +194,7 @@ impl<T, S> IndexSet<T, S> {
     /// Return an iterator over the values of the set, in their order
     pub fn iter(&self) -> Iter<'_, T> {
         Iter {
-            iter: self.map.keys().iter,
+            iter: self.map.as_entries().iter(),
         }
     }
 
@@ -593,6 +598,13 @@ where
 }
 
 impl<T, S> IndexSet<T, S> {
+    /// Returns a slice of all the values in the set.
+    ///
+    /// Computes in **O(1)** time.
+    pub fn as_slice(&self) -> &Slice<T> {
+        Slice::from_slice(self.as_entries())
+    }
+
     /// Get a value by index
     ///
     /// Valid indices are *0 <= index < self.len()*
@@ -600,6 +612,17 @@ impl<T, S> IndexSet<T, S> {
     /// Computes in **O(1)** time.
     pub fn get_index(&self, index: usize) -> Option<&T> {
         self.as_entries().get(index).map(Bucket::key_ref)
+    }
+
+    /// Returns a slice of values in the given range of indices.
+    ///
+    /// Valid indices are *0 <= index < self.len()*
+    ///
+    /// Computes in **O(1)** time.
+    pub fn get_range<R: RangeBounds<usize>>(&self, range: R) -> Option<&Slice<T>> {
+        let entries = self.as_entries();
+        let range = try_simplify_range(range, entries.len())?;
+        entries.get(range).map(Slice::from_slice)
     }
 
     /// Get the first value
@@ -734,7 +757,14 @@ impl<T: fmt::Debug> fmt::Debug for IntoIter<T> {
 /// [`IndexSet`]: struct.IndexSet.html
 /// [`iter`]: struct.IndexSet.html#method.iter
 pub struct Iter<'a, T> {
-    iter: slice::Iter<'a, Bucket<T>>,
+    iter: SliceIter<'a, Bucket<T>>,
+}
+
+impl<'a, T> Iter<'a, T> {
+    /// Returns a slice of the remaining entries in the iterator.
+    pub fn as_slice(&self) -> &'a Slice<T> {
+        Slice::from_slice(self.iter.as_slice())
+    }
 }
 
 impl<'a, T> Iterator for Iter<'a, T> {

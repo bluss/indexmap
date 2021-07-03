@@ -14,6 +14,7 @@ use core::cmp::Ordering;
 use core::fmt;
 use core::hash::{BuildHasher, Hash};
 
+use crate::map::Slice;
 use crate::Bucket;
 use crate::Entries;
 use crate::IndexMap;
@@ -78,6 +79,22 @@ where
     }
 }
 
+/// Requires crate feature `"rayon"`.
+impl<'a, K, V> IntoParallelIterator for &'a Slice<K, V>
+where
+    K: Sync,
+    V: Sync,
+{
+    type Item = (&'a K, &'a V);
+    type Iter = ParIter<'a, K, V>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        ParIter {
+            entries: &self.entries,
+        }
+    }
+}
+
 /// A parallel iterator over the entries of a `IndexMap`.
 ///
 /// This `struct` is created by the [`par_iter`] method on [`IndexMap`]
@@ -124,6 +141,22 @@ where
     fn into_par_iter(self) -> Self::Iter {
         ParIterMut {
             entries: self.as_entries_mut(),
+        }
+    }
+}
+
+/// Requires crate feature `"rayon"`.
+impl<'a, K, V> IntoParallelIterator for &'a mut Slice<K, V>
+where
+    K: Sync + Send,
+    V: Send,
+{
+    type Item = (&'a K, &'a mut V);
+    type Iter = ParIterMut<'a, K, V>;
+
+    fn into_par_iter(self) -> Self::Iter {
+        ParIterMut {
+            entries: &mut self.entries,
         }
     }
 }
@@ -176,6 +209,37 @@ where
     pub fn par_values(&self) -> ParValues<'_, K, V> {
         ParValues {
             entries: self.as_entries(),
+        }
+    }
+}
+
+/// Parallel iterator methods and other parallel methods.
+///
+/// The following methods **require crate feature `"rayon"`**.
+///
+/// See also the `IntoParallelIterator` implementations.
+impl<K, V> Slice<K, V>
+where
+    K: Sync,
+    V: Sync,
+{
+    /// Return a parallel iterator over the keys of the map slice.
+    ///
+    /// While parallel iterators can process items in any order, their relative order
+    /// in the slice is still preserved for operations like `reduce` and `collect`.
+    pub fn par_keys(&self) -> ParKeys<'_, K, V> {
+        ParKeys {
+            entries: &self.entries,
+        }
+    }
+
+    /// Return a parallel iterator over the values of the map slice.
+    ///
+    /// While parallel iterators can process items in any order, their relative order
+    /// in the slice is still preserved for operations like `reduce` and `collect`.
+    pub fn par_values(&self) -> ParValues<'_, K, V> {
+        ParValues {
+            entries: &self.entries,
         }
     }
 }
@@ -282,6 +346,23 @@ where
     pub fn par_values_mut(&mut self) -> ParValuesMut<'_, K, V> {
         ParValuesMut {
             entries: self.as_entries_mut(),
+        }
+    }
+}
+
+/// Requires crate feature `"rayon"`.
+impl<K, V> Slice<K, V>
+where
+    K: Send,
+    V: Send,
+{
+    /// Return a parallel iterator over mutable references to the the values of the map slice.
+    ///
+    /// While parallel iterators can process items in any order, their relative order
+    /// in the slice is still preserved for operations like `reduce` and `collect`.
+    pub fn par_values_mut(&mut self) -> ParValuesMut<'_, K, V> {
+        ParValuesMut {
+            entries: &mut self.entries,
         }
     }
 }

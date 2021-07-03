@@ -28,6 +28,42 @@ use core::hash::{BuildHasher, Hash};
 use core::marker::PhantomData;
 
 use crate::IndexMap;
+use crate::map::Slice as MapSlice;
+use crate::set::Slice as SetSlice;
+
+/// Serializes a `map::Slice` as an ordered sequence.
+///
+/// This behaves like [`crate::serde_seq`] for `IndexMap`, serializing a sequence
+/// of `(key, value)` pairs, rather than as a map that might not preserver order.
+///
+/// Requires crate feature `"serde"` or `"serde-1"`
+impl<K, V> Serialize for MapSlice<K, V>
+where
+    K: Serialize,
+    V: Serialize,
+{
+    fn serialize<T>(&self, serializer: T) -> Result<T::Ok, T::Error>
+    where
+        T: Serializer,
+    {
+        serializer.collect_seq(self)
+    }
+}
+
+/// Serializes a `set::Slice` as an ordered sequence.
+///
+/// Requires crate feature `"serde"` or `"serde-1"`
+impl<T> Serialize for SetSlice<T>
+where
+    T: Serialize,
+{
+    fn serialize<Se>(&self, serializer: Se) -> Result<Se::Ok, Se::Error>
+    where
+        Se: Serializer,
+    {
+        serializer.collect_seq(self)
+    }
+}
 
 /// Serializes an `IndexMap` as an ordered sequence.
 ///
