@@ -183,6 +183,45 @@ quickcheck! {
             map[&key] == value && map[i] == value
         })
     }
+
+    fn swap_indices(vec: Vec<u8>, a: usize, b: usize) -> TestResult {
+        let mut set = IndexSet::<u8>::from_iter(vec);
+        if a >= set.len() || b >= set.len() {
+            return TestResult::discard();
+        }
+
+        let mut vec = Vec::from_iter(set.iter().cloned());
+        vec.swap(a, b);
+
+        set.swap_indices(a, b);
+
+        // Check both iteration order and hash lookups
+        assert!(set.iter().eq(vec.iter()));
+        assert!(vec.iter().enumerate().all(|(i, x)| {
+            set.get_index_of(x) == Some(i)
+        }));
+        TestResult::passed()
+    }
+
+    fn move_index(vec: Vec<u8>, from: usize, to: usize) -> TestResult {
+        let mut set = IndexSet::<u8>::from_iter(vec);
+        if from >= set.len() || to >= set.len() {
+            return TestResult::discard();
+        }
+
+        let mut vec = Vec::from_iter(set.iter().cloned());
+        let x = vec.remove(from);
+        vec.insert(to, x);
+
+        set.move_index(from, to);
+
+        // Check both iteration order and hash lookups
+        assert!(set.iter().eq(vec.iter()));
+        assert!(vec.iter().enumerate().all(|(i, x)| {
+            set.get_index_of(x) == Some(i)
+        }));
+        TestResult::passed()
+    }
 }
 
 use crate::Op::*;

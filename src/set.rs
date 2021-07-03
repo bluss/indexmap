@@ -642,6 +642,19 @@ impl<T, S> IndexSet<T, S> {
         self.map.shift_remove_index(index).map(|(x, ())| x)
     }
 
+    /// Moves the position of a value from one index to another
+    /// by shifting all other values in-between.
+    ///
+    /// If `from < to`, the other values will shift down while the targeted value moves up.
+    /// If `from > to`, the other values will shift up while the targeted value moves down.
+    ///
+    /// ***Panics*** if `from` or `to` are out of bounds.
+    ///
+    /// Computes in **O(n)** time (average).
+    pub fn move_index(&mut self, from: usize, to: usize) {
+        self.map.move_index(from, to)
+    }
+
     /// Swaps the position of two values in the set.
     ///
     /// ***Panics*** if `a` or `b` are out of bounds.

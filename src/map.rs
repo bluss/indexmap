@@ -773,6 +773,19 @@ impl<K, V, S> IndexMap<K, V, S> {
         self.core.shift_remove_index(index)
     }
 
+    /// Moves the position of a key-value pair from one index to another
+    /// by shifting all other pairs in-between.
+    ///
+    /// If `from < to`, the other pairs will shift down while the targeted pair moves up.
+    /// If `from > to`, the other pairs will shift up while the targeted pair moves down.
+    ///
+    /// ***Panics*** if `from` or `to` are out of bounds.
+    ///
+    /// Computes in **O(n)** time (average).
+    pub fn move_index(&mut self, from: usize, to: usize) {
+        self.core.move_index(from, to)
+    }
+
     /// Swaps the position of two key-value pairs in the map.
     ///
     /// ***Panics*** if `a` or `b` are out of bounds.
